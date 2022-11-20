@@ -1,0 +1,156 @@
+accelerator:
+  displayName: TMF Product Catalog Management API (Java)
+  description: Provides a standardized solution for rapidly adding partners’ products to an existing Catalog. It brings the capability for Service Providers to directly feed partners systems with the technical description of the products they propose to them.
+  iconUrl: https://projects.tmforum.org/wiki/download/attachments/35359579/API?version=3&modificationDate=1531062677000&api=v2
+  tags:
+    - java
+    - spring
+    - tmf620
+  options:
+    - name: pkgName
+      label: Package name
+      inputType: text
+      defaultValue: "com.vodafone"
+      required: true
+    - name: javaVersion
+      label: Java version
+      inputType: radio
+      dataType: number
+      defaultValue: 11
+      choices:
+        - value: 8
+          text: 1.8
+        - value: 11
+          text: 11
+        - value: 17
+          text: 17
+      required: true
+    - name: springBootVersion
+      label: Spring Boot version
+      inputType: select
+      choices:
+      - value: 2.5.12
+        text: 2.5.12
+      - value: 2.6.6
+        text: 2.6.6
+      - value: 3.0.0-M2
+        text: 3.0.0 (M2)
+      defaultValue: "2.6.6"
+      required: true
+    - name: database
+      label: Database
+      inputType: select
+      choices:
+        - text: MongoDB
+          value: mongo
+        - text: PostgreSQL
+          value: postgres
+      defaultValue: "postgres"
+      required: true
+    - name: gitUrl
+      label: Git repository URL
+      display: true
+      description: Git repository URL of the application's source code
+      inputType: text
+      dataType: string
+      defaultValue: "https://github.com/tsalm-pivotal/tm-forum-java.git"
+    - name: gitBranch
+      label: Git repository branch
+      display: true
+      description: Git repository branch of the application's source code
+      inputType: text
+      dataType: string
+      defaultValue: "main"
+    - name: namespace
+      label: Deployment namespace
+      display: true
+      description: The Kubernetes namespace the application will be deployed in
+      inputType: text
+      dataType: string
+      defaultValue: "dev-space"
+    - name: apiSpecLocation
+      label: API specification location
+      inputType: select
+      choices:
+      - value: local
+        text: Local path
+      - value: remote
+        text: Remote path
+      defaultValue: "local"
+      required: true
+    - name: cnrSubdomain
+      label: Deployment environment Cloud Native Runtimes subdomain
+      defaultValue: "cnrs.tap.example.com"
+      display: true
+      description: The TAP environment's Cloud Native Runtimes subdomain
+      inputType: text
+      dataType: string
+      dependsOn:
+        name: apiSpecLocation
+        value: remote
+engine:
+  merge:
+  - exclude: [ "accelerator-deployment.yaml", "update-accelerator.sh", "catalog/components/database/*.yaml"]
+  - include: [ "config/workload.yaml" ]
+    chain:
+    - type: ReplaceText
+      substitutions:
+      - text: https://github.com/tsalm-pivotal/tm-forum-java.git
+        with: "#gitUrl"
+      - text: main
+        with: "#gitBranch"
+      - text: tmf-product-catalog-management-api-java
+        with: "#artifactId"
+      - text: default
+        with: "#namespace"
+    - type: ReplaceText
+      condition: "#database == 'postgres'"
+      substitutions:
+      - text: "'apiVersion: services.apps.tanzu.vmware.com/v1alpha1'"
+        with: "'apiVersion: sql.tanzu.vmware.com/v1'"
+      - text: "'kind: ResourceClaim'"
+        with: "'kind: Postgres'"
+      - text: "'name: mongodb-binding-compatible'"
+        with: "'name: postgres-1'"
+  - include: [ "**/*.java", "**/*.properties" ]
+    chain:
+    - type: ReplaceText
+      regex:
+        pattern: com.vodafone
+        with: "#pkgName"
+    - type: RewritePath
+      regex: src/main/java/com/vodafone/(.*)
+      rewriteTo: "'src/main/java/' + #pkgName.replace('.', '/') + '/' + #g1"
+    - type: ReplaceText
+      substitutions:
+        - text: database=mongo
+          with: "'database=' + #database"
+  - include: [ "pom.xml" ]
+    chain:
+      - type: ReplaceText
+        substitutions:
+        - text: "<groupId>com.vodafone</groupId>'"
+          with: "'<groupId>' + #pkgName + '</groupId>'"
+        - text: tmf-product-catalog-management-api
+          with: "#artifactId"
+        - text: "'´<java.version>1.8</java.version>"
+          with: "'<java.version>' + #javaVersion + '</java.version>'"
+        - text: "<version>2.6.2</version>"
+          with: "'<version>' + #springBootVersion + '</version>'"
+  - include: [ "catalog/catalog-info.yaml" ]
+    chain:
+      - type: ReplaceText
+        substitutions:
+          - text: "component-mongo.yaml"
+            with: "'component-' + #database + '.yaml'"
+  - include: [ "catalog/apis/api.yaml" ]
+    chain:
+      - type: ReplaceText
+        condition: "#apiSpecLocation == 'remote'"
+        substitutions:
+          - text: "../../src/main/resources/openapi.yaml"
+            with: "'https://' + #artifactId + '-' + #namespace + '.' + #cnrSubdomain + '/v3/api-docs.yaml'"
+  - include: [ "catalog/components/database/component-postgres.yaml" ]
+    condition: "#database == 'postgres'"
+  - include: [ "catalog/components/database/component-mongo.yaml" ]
+    condition: "#database == 'mongo'"
